@@ -1,3 +1,13 @@
+# 0.3.2
+Release date: Sep. 30, 2025
+
+## Updates
+
+1. Automatically render audio from MuseScore file support
+2. Normalize audio support
+3. Added audio sample rate selection
+4. Added audio bit depth selection
+
 # 0.3.1
 Release date: Apr. 14, 2025
 

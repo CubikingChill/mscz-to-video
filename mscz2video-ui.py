@@ -53,6 +53,7 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6_modified import TextWrappedQLabel
 import re
 import shutil
+import soundfile
 import subprocess
 import sys
 import threading
@@ -338,6 +339,12 @@ class MainWindow(QWidget):
         self.clear_audio_button = QPushButton("Clear audio file", self)
         self.clear_audio_button.clicked.connect(self.clear_audio)
         self.current_audio_label = TextWrappedQLabel("No audio file selected", self)
+        self.render_audio_checkbox = QCheckBox("Render audio from MuseScore", self)
+        self.render_audio_checkbox.setChecked(False)
+        self.render_audio_checkbox.stateChanged.connect(self.toggle_audio_source)
+        self.render_normalize_checkbox = QCheckBox("Normalize audio", self)
+        self.render_normalize_checkbox.setEnabled(False)
+        self.render_normalize_checkbox.setChecked(True)
         self.audio_delay_label = QLabel("Audio delay:", self)
         self.audio_delay_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.audio_delay_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -413,6 +420,29 @@ class MainWindow(QWidget):
         self.audio_bitrate.setSingleStep(1)
         self.audio_bitrate.setAccelerated(True)
         self.audio_bitrate.setSuffix(" kbps")
+        self.audio_samplerate_label = QLabel("Audio sample rate:", self)
+        self.audio_samplerate_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.audio_samplerate_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.audio_samplerate = QComboBox(self)
+        self.audio_samplerate.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.audio_samplerate.addItem("Default (Use source rate)", 0)
+        self.audio_samplerate.addItem("8000 Hz", 8000)
+        self.audio_samplerate.addItem("16000 Hz", 16000)
+        self.audio_samplerate.addItem("22050 Hz", 22050)
+        self.audio_samplerate.addItem("24000 Hz", 24000)
+        self.audio_samplerate.addItem("32000 Hz", 32000)
+        self.audio_samplerate.addItem("44100 Hz", 44100)
+        self.audio_samplerate.addItem("48000 Hz", 48000)
+        self.audio_samplerate.addItem("96000 Hz", 96000)
+        self.audio_samplerate.addItem("192000 Hz", 192000)
+        self.audio_bitdepth_label = QLabel("Audio bit depth:", self)
+        self.audio_bitdepth_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.audio_bitdepth_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.audio_bitdepth = QComboBox(self)
+        self.audio_bitdepth.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.audio_bitdepth.addItem("Default (Use source bit depth)", 0)
+        self.audio_bitdepth.addItem("16 bit", 16)
+        self.audio_bitdepth.addItem("32 bit (24 on flac and alac)", 32)
 
         self.size_label = QLabel("Size:", self)
         self.size_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -621,6 +651,8 @@ class MainWindow(QWidget):
         self.audio_buttons_layout.addWidget(self.clear_audio_button)
         self.files_layout.addLayout(self.audio_buttons_layout)
         self.files_layout.addWidget(self.current_audio_label)
+        self.files_layout.addWidget(self.render_audio_checkbox)
+        self.files_layout.addWidget(self.render_normalize_checkbox)
         self.audio_delay_layout = QHBoxLayout()
         self.audio_delay_layout.addWidget(self.audio_delay_label)
         self.audio_delay_layout.addWidget(self.audio_delay)
@@ -640,6 +672,14 @@ class MainWindow(QWidget):
         self.audio_encoder_layout.addWidget(self.audio_encoder)
         self.audio_encoder_layout.addWidget(self.audio_bitrate)
         self.files_layout.addLayout(self.audio_encoder_layout)
+        self.audio_samplerate_layout = QHBoxLayout()
+        self.audio_samplerate_layout.addWidget(self.audio_samplerate_label)
+        self.audio_samplerate_layout.addWidget(self.audio_samplerate)
+        self.files_layout.addLayout(self.audio_samplerate_layout)
+        self.audio_bitdepth_layout = QHBoxLayout()
+        self.audio_bitdepth_layout.addWidget(self.audio_bitdepth_label)
+        self.audio_bitdepth_layout.addWidget(self.audio_bitdepth)
+        self.files_layout.addLayout(self.audio_bitdepth_layout)
 
         self.controls_layout = QVBoxLayout(self.controls_frame)
         self.size_fps_layout = QHBoxLayout()
@@ -900,6 +940,23 @@ class MainWindow(QWidget):
         self.load_mscz_button.setDisabled(False)
         self.load_mscz_button.setToolTip("")
 
+    def toggle_audio_source(self, _):
+        print("Audio source checkbox toggled", file=sys.stderr)
+        if self.render_audio_checkbox.isChecked():
+            self.load_audio_button.setDisabled(True)
+            self.clear_audio_button.setDisabled(True)
+            self.current_audio_label.setDisabled(True)
+            self.audio_delay.setDisabled(True)
+            self.audio_delay_link.setDisabled(True)
+            self.render_normalize_checkbox.setDisabled(False)
+        else:
+            self.load_audio_button.setDisabled(False)
+            self.clear_audio_button.setDisabled(False)
+            self.current_audio_label.setDisabled(False)
+            self.audio_delay.setDisabled(False)
+            self.audio_delay_link.setDisabled(False)
+            self.render_normalize_checkbox.setDisabled(True)
+
     def switch_video_bitrate_range(self):
         if self.video_encoder_method.currentText() == "VBR":
             self.video_bitrate.setRange(1, 1000000)
@@ -1011,12 +1068,90 @@ class MainWindow(QWidget):
         self.exec_in_main(lambda: self.files_frame.setDisabled(True))
         output_path = pathlib.Path(output_path)
         extra_ffmpeg_args = []
+        if self.render_audio_checkbox.isChecked():
+            temp_audio_path = output_path.with_suffix(".flac")
+            if temp_audio_path.exists():
+                m = self.exec_in_main(
+                    lambda: QMessageBox.question(
+                        self,
+                        "Temporary audio file exists",
+                        f"Temporary audio file {temp_audio_path} already exists, do you want to overwrite it?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    )
+                )
+                if m != QMessageBox.StandardButton.Yes:
+                    self.exec_in_main(lambda: self.render_button.setDisabled(False))
+                    self.exec_in_main(lambda: self.controls_frame.setDisabled(False))
+                    self.exec_in_main(lambda: self.files_frame.setDisabled(False))
+                    return
+                if temp_audio_path.is_file():
+                    temp_audio_path.unlink()
+                else:
+                    QMessageBox.critical(
+                        self,
+                        "Temporary audio file exists",
+                        f"Temporary audio file {temp_audio_path} already exists and is not a file, please remove it manually.",
+                        QMessageBox.StandardButton.Ok,
+                    )
+                    self.exec_in_main(lambda: self.render_button.setDisabled(False))
+                    self.exec_in_main(lambda: self.controls_frame.setDisabled(False))
+                    self.exec_in_main(lambda: self.files_frame.setDisabled(False))
+                    return
+            self.exec_in_main(lambda: self.progess_text.setText("Rendering MuseScore audio"))
+            subprocess.Popen([self.musescore_path, "-o", str(temp_audio_path), self.current_mscz_label.text()]).wait()
+            if not temp_audio_path.exists():
+                self.exec_in_main(
+                    lambda: QMessageBox.critical(
+                        self,
+                        "Extract audio failed",
+                        "Failed to extract audio from MuseScore file.",
+                        QMessageBox.StandardButton.Ok,
+                    )
+                )
+                self.exec_in_main(lambda: self.render_button.setDisabled(False))
+                self.exec_in_main(lambda: self.controls_frame.setDisabled(False))
+                self.exec_in_main(lambda: self.files_frame.setDisabled(False))
+                return
+            if self.render_normalize_checkbox.isChecked():
+                try:
+                    wav, sr = soundfile.read(str(temp_audio_path))
+                    peak = np.max(np.abs(wav))
+                    if peak > 0:
+                        wav = wav / peak * 0.995
+                        soundfile.write(
+                            str(temp_audio_path),
+                            wav,
+                            sr,
+                            subtype="PCM_24" if self.audio_bitdepth.currentData() == 32 else "PCM_16",
+                        )
+                except Exception:
+                    print("Failed to normalize audio:", traceback.format_exc(), file=sys.stderr)
+                    self.exec_in_main(
+                        lambda: QMessageBox.warning(
+                            self,
+                            "Normalize audio failed",
+                            f"Failed to normalize audio, skipping: {traceback.format_exc()}",
+                            QMessageBox.StandardButton.Ok,
+                        )
+                    )
+            self.exec_in_main(lambda: self.current_audio_label.setText(str(temp_audio_path)))
+            self.exec_in_main(
+                lambda: self.audio_delay.setValue(float(self.start_offset.value() - self.from_time.value()))
+            )
+        ffmpeg_afilter = []
         if self.current_audio_label.text() != "No audio file selected":
             if self.audio_delay.value() < 0:
                 extra_ffmpeg_args += ["-ss", str(-self.audio_delay.value())]
             extra_ffmpeg_args += ["-i", self.current_audio_label.text()]
             if self.audio_delay.value() > 0:
-                extra_ffmpeg_args += ["-af", f"adelay={int(self.audio_delay.value() * 1000)}:all=1"]
+                ffmpeg_afilter.append(f"adelay={int(self.audio_delay.value() * 1000)}:all=1")
+        if self.audio_samplerate.currentData() != 0:
+            ffmpeg_afilter.append("aresample=resampler=soxr:precision=28")
+            extra_ffmpeg_args += ["-ar", str(self.audio_samplerate.currentData())]
+        if self.audio_bitdepth.currentData() != 0:
+            extra_ffmpeg_args += ["-sample_fmt", f"s{self.audio_bitdepth.currentData()}"]
+        if ffmpeg_afilter:
+            extra_ffmpeg_args += ["-af", ",".join(ffmpeg_afilter)]
         extra_ffmpeg_args += ["-c:a", self.audio_encoder.currentText()]
         extra_ffmpeg_args += ["-b:a", str(self.audio_bitrate.value()) + "k"]
         extra_ffmpeg_args += ["-pix_fmt", "yuv420p"]
