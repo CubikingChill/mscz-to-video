@@ -1,3 +1,9 @@
+# 0.4
+Release date: Dec. 31, 2025  🎉Happy New Year!🎉
+
+## Updates
+1. Mask mode! Now it's easier to add visial effects in your video edit software
+
 # 0.3.2
 Release date: Sep. 30, 2025
 
