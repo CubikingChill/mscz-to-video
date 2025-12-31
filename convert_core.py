@@ -35,7 +35,7 @@ import typing
 import xml.etree.ElementTree as ET
 import zipfile
 
-__version__ = "0.3.2"
+__version__ = "0.4"
 
 PIL.ImageFile.LOAD_TRUNCATED_IMAGES = True
 PIL.Image.MAX_IMAGE_PIXELS = None
@@ -248,6 +248,7 @@ class Converter:
                     bar_box: tuple[int, int, int, int],
                     note_box: tuple[int, int, int, int],
                     out_size: tuple[int, int],
+                    render_mode: int,
                     device: torch.device,
                     bar_color: torch.Tensor,
                     note_color: torch.Tensor,
@@ -259,49 +260,73 @@ class Converter:
                         *note_box,
                         fallback_cpu=fallback_cpu,
                     )
-                    overlay = torch.zeros_like(img, dtype=img.dtype, device=device)
-                    bar_box_offseted = (
-                        max(bar_box[0] - box[0], 0),
-                        max(bar_box[1] - box[1], 0),
-                        min(bar_box[2] - box[0], out_size[0]),
-                        min(bar_box[3] - box[1], out_size[1]),
-                    )
-                    note_box_offseted = (
-                        max(note_box[0] - box[0], 0),
-                        max(note_box[1] - box[1], 0),
-                        min(note_box[2] - box[0], out_size[0]),
-                        min(note_box[3] - box[1], out_size[1]),
-                    )
-                    # Draw current bar
-                    overlay[bar_box_offseted[1] : bar_box_offseted[3], bar_box_offseted[0] : bar_box_offseted[2]] = (
-                        bar_color
-                    )
-                    # Draw current note
-                    overlay[
-                        note_box_offseted[1] : note_box_offseted[3], note_box_offseted[0] : note_box_offseted[2]
-                    ] = note_color
-                    overlay_area = (
-                        min(bar_box_offseted[1], note_box_offseted[1]),
-                        max(bar_box_offseted[3], note_box_offseted[3]),
-                        min(bar_box_offseted[0], note_box_offseted[0]),
-                        max(bar_box_offseted[2], note_box_offseted[2]),
-                    )
-                    if (overlay.any() if "xpu" not in device.type else overlay.cpu().any()).item():
-                        overlay /= torch.tensor(255.0, dtype=img.dtype, device=device)
-                        overlay[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3] *= img[
-                            overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3
-                        ]
-                        overlay[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3] *= overlay[
-                            overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], 3, None
-                        ]
-                        img[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3] *= (
-                            torch.tensor(1.0, dtype=img.dtype, device=device)
-                            - overlay[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], 3, None]
+                    if render_mode == 0:  # colorful
+                        overlay = torch.zeros_like(img, dtype=img.dtype, device=device)
+                        bar_box_offseted = (
+                            max(bar_box[0] - box[0], 0),
+                            max(bar_box[1] - box[1], 0),
+                            min(bar_box[2] - box[0], out_size[0]),
+                            min(bar_box[3] - box[1], out_size[1]),
                         )
-                        img[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3] += overlay[
-                            overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3
-                        ]
-                        img[..., 3] = torch.tensor(1.0, dtype=img.dtype, device=device)
+                        note_box_offseted = (
+                            max(note_box[0] - box[0], 0),
+                            max(note_box[1] - box[1], 0),
+                            min(note_box[2] - box[0], out_size[0]),
+                            min(note_box[3] - box[1], out_size[1]),
+                        )
+                        # Draw current bar
+                        overlay[
+                            bar_box_offseted[1] : bar_box_offseted[3], bar_box_offseted[0] : bar_box_offseted[2]
+                        ] = bar_color
+                        # Draw current note
+                        overlay[
+                            note_box_offseted[1] : note_box_offseted[3], note_box_offseted[0] : note_box_offseted[2]
+                        ] = note_color
+                        overlay_area = (
+                            min(bar_box_offseted[1], note_box_offseted[1]),
+                            max(bar_box_offseted[3], note_box_offseted[3]),
+                            min(bar_box_offseted[0], note_box_offseted[0]),
+                            max(bar_box_offseted[2], note_box_offseted[2]),
+                        )
+                        if (overlay.any() if "xpu" not in device.type else overlay.cpu().any()).item():
+                            overlay /= torch.tensor(255.0, dtype=img.dtype, device=device)
+                            overlay[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3] *= img[
+                                overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3
+                            ]
+                            overlay[
+                                overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3
+                            ] *= overlay[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], 3, None]
+                            img[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3] *= (
+                                torch.tensor(1.0, dtype=img.dtype, device=device)
+                                - overlay[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], 3, None]
+                            )
+                            img[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3] += overlay[
+                                overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3
+                            ]
+                            # img[..., 3] = torch.tensor(1.0, dtype=img.dtype, device=device)
+                    elif render_mode == 1:  # cursor
+                        note_box_offseted = (
+                            max(note_box[0] - box[0], 0),
+                            max(note_box[1] - box[1], 0),
+                            min(note_box[2] - box[0], out_size[0]),
+                            min(note_box[3] - box[1], out_size[1]),
+                        )
+                        img = torch.zeros((out_size[1], out_size[0], 3), dtype=torch.uint8, device=device)
+                        img[
+                            note_box_offseted[1] : note_box_offseted[3], note_box_offseted[0] : note_box_offseted[2], :
+                        ] = 1.0
+                    elif render_mode == 2:  # left
+                        # Use bar box directly as we've already calculated left border
+                        note_box_offseted = (
+                            max(bar_box[0] - box[0], 0),
+                            max(bar_box[1] - box[1], 0),
+                            min(note_box[2] - box[0], out_size[0]),
+                            min(bar_box[3] - box[1], out_size[1]),
+                        )
+                        img = torch.zeros((out_size[1], out_size[0], 3), dtype=torch.uint8, device=device)
+                        img[
+                            note_box_offseted[1] : note_box_offseted[3], note_box_offseted[0] : note_box_offseted[2], :
+                        ] = 1.0
                     if "xpu" in device.type:
                         return (
                             (img[..., :3] * torch.tensor(255.0, dtype=img.dtype, device=device)).cpu().to(torch.uint8)
@@ -327,6 +352,7 @@ class Converter:
             b = io.BytesIO(base64.b64decode(page))
             self._pngs.append(np.array(PIL.Image.open(b).convert("RGBA")).astype(np.float16) / 255)
         print("Reading png... Done          ", file=sys.stderr)
+        print("Exported page size", tuple(reversed(self._pngs[0].shape[:2])), file=sys.stderr)
         self._highlight_ratio = (12, 12)
 
         self._bars: list[tuple[int, int]] = []
@@ -441,63 +467,118 @@ class Converter:
         # Draw bar and note highlights
         if not self._use_torch:
             img, box = self._resize(PIL.Image.fromarray((img * 255).astype(np.uint8)), *self._size, *note_box)
-            img = np.array(img).astype(np.float16) / 255
-            overlay = np.zeros_like(img, dtype=np.float16)
-            # Draw current bar
-            if self._bar_alpha > 0:
-                color = self._bar_color + (self._bar_alpha,)
-                bar_box_offseted = (
-                    max(bar_box[0] - box[0], 0),
-                    max(bar_box[1] - box[1], 0),
-                    min(bar_box[2] - box[0], self._size[0]),
-                    min(bar_box[3] - box[1], self._size[1]),
-                )
-                overlay_area = bar_box_offseted
-                overlay[bar_box_offseted[1] : bar_box_offseted[3], bar_box_offseted[0] : bar_box_offseted[2]] = color
-            # Draw current note
-            if self._note_alpha > 0:
-                color = self._note_color + (self._note_alpha,)
+            if self._render_mode == "colorful":
+                img = np.array(img).astype(np.float16) / 255
+                overlay = np.zeros_like(img, dtype=np.float16)
+                # Draw current bar
+                if self._bar_alpha > 0:
+                    color = self._bar_color + (self._bar_alpha,)
+                    bar_box_offseted = (
+                        max(bar_box[0] - box[0], 0),
+                        max(bar_box[1] - box[1], 0),
+                        min(bar_box[2] - box[0], self._size[0]),
+                        min(bar_box[3] - box[1], self._size[1]),
+                    )
+                    overlay_area = bar_box_offseted
+                    overlay[bar_box_offseted[1] : bar_box_offseted[3], bar_box_offseted[0] : bar_box_offseted[2]] = (
+                        color
+                    )
+                # Draw current note
+                if self._note_alpha > 0:
+                    color = self._note_color + (self._note_alpha,)
+                    note_box_offseted = (
+                        max(note_box[0] - box[0], 0),
+                        max(note_box[1] - box[1], 0),
+                        min(note_box[2] - box[0], self._size[0]),
+                        min(note_box[3] - box[1], self._size[1]),
+                    )
+                    overlay_area = note_box_offseted
+                    overlay[
+                        note_box_offseted[1] : note_box_offseted[3], note_box_offseted[0] : note_box_offseted[2]
+                    ] = color
+                if self._bar_alpha > 0 and self._note_alpha > 0:
+                    overlay_area = (
+                        min(bar_box_offseted[1], note_box_offseted[1]),
+                        max(bar_box_offseted[3], note_box_offseted[3]),
+                        min(bar_box_offseted[0], note_box_offseted[0]),
+                        max(bar_box_offseted[2], note_box_offseted[2]),
+                    )
+                if overlay.any():
+                    overlay /= 255
+                    overlay[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3] *= img[
+                        overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3
+                    ]
+                    overlay[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3] *= overlay[
+                        overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], 3, None
+                    ]
+                    img[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3] *= (
+                        1 - overlay[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], 3, None]
+                    )
+                    img[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3] += overlay[
+                        overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3
+                    ]
+                    img[..., 3] = 1
+                    img = PIL.Image.fromarray((img * 255).astype(np.uint8))
+                    out_bytes = img.convert("RGB").tobytes()
+            elif self._render_mode == "cursor":
                 note_box_offseted = (
                     max(note_box[0] - box[0], 0),
                     max(note_box[1] - box[1], 0),
                     min(note_box[2] - box[0], self._size[0]),
                     min(note_box[3] - box[1], self._size[1]),
                 )
-                overlay_area = note_box_offseted
-                overlay[note_box_offseted[1] : note_box_offseted[3], note_box_offseted[0] : note_box_offseted[2]] = (
-                    color
+                img = np.zeros((self._size[1], self._size[0], 3), dtype=np.uint8)
+                img[note_box_offseted[1] : note_box_offseted[3], note_box_offseted[0] : note_box_offseted[2], :] = 255
+                out_bytes = img.tobytes()
+            elif self._render_mode == "left":
+                # Find out the first bar in this line
+                finding_bar_elid = self._bars[bar_idx][1]
+                while finding_bar_elid >= 0:
+                    if (
+                        self._bar_pos[finding_bar_elid]["page"] < self._bar_pos[self._bars[bar_idx][1]]["page"]
+                        or self._bar_pos[finding_bar_elid]["y"] + self._bar_pos[finding_bar_elid]["height"]
+                        < self._bar_pos[self._bars[bar_idx][1]]["y"]
+                    ):
+                        break
+                    finding_bar_elid -= 1
+                first_bar_in_line_elid = finding_bar_elid + 1
+                # We use left border of first bar in line as left border, and left border of current note as right border
+                note_box_offseted = (
+                    max(self._bar_pos[first_bar_in_line_elid]["x"] - box[0], 0),
+                    max(note_box[1] - box[1], 0),
+                    min(note_box[2] - box[0], self._size[0]),
+                    min(note_box[3] - box[1], self._size[1]),
                 )
-            if self._bar_alpha > 0 and self._note_alpha > 0:
-                overlay_area = (
-                    min(bar_box_offseted[1], note_box_offseted[1]),
-                    max(bar_box_offseted[3], note_box_offseted[3]),
-                    min(bar_box_offseted[0], note_box_offseted[0]),
-                    max(bar_box_offseted[2], note_box_offseted[2]),
-                )
-            if overlay.any():
-                overlay /= 255
-                overlay[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3] *= img[
-                    overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3
-                ]
-                overlay[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3] *= overlay[
-                    overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], 3, None
-                ]
-                img[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3] *= (
-                    1 - overlay[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], 3, None]
-                )
-                img[overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3] += overlay[
-                    overlay_area[0] : overlay_area[1], overlay_area[2] : overlay_area[3], :3
-                ]
-                img[..., 3] = 1
-                img = PIL.Image.fromarray((img * 255).astype(np.uint8))
-                out_bytes = img.convert("RGB").tobytes()
+                img = np.zeros((self._size[1], self._size[0], 3), dtype=np.uint8)
+                img[note_box_offseted[1] : note_box_offseted[3], note_box_offseted[0] : note_box_offseted[2], :] = 255
+                out_bytes = img.tobytes()
         else:
+            if self._render_mode == "left":
+                # In torch mode, we need to adjust note_box before passing to _process_torch
+                finding_bar_elid = self._bars[bar_idx][1]
+                while finding_bar_elid >= 0:
+                    if (
+                        self._bar_pos[finding_bar_elid]["page"] < self._bar_pos[self._bars[bar_idx][1]]["page"]
+                        or self._bar_pos[finding_bar_elid]["y"] + self._bar_pos[finding_bar_elid]["height"]
+                        < self._bar_pos[self._bars[bar_idx][1]]["y"]
+                    ):
+                        break
+                    finding_bar_elid -= 1
+                first_bar_in_line_elid = finding_bar_elid + 1
+                # We use left border of first bar in line as left border, and left border of current note as right border
+                bar_box = (
+                    self._bar_pos[first_bar_in_line_elid]["x"],
+                    note_box[1],
+                    note_box[2],
+                    note_box[3],
+                )
             out_bytes = (
                 _process_torch(
                     img,
                     bar_box,
                     note_box,
                     self._size,
+                    {"colorful": 0, "cursor": 1, "left": 2}[self._render_mode],
                     device,
                     torch.tensor(
                         self._bar_color + (self._bar_alpha,),
@@ -591,6 +672,7 @@ class Converter:
         fixed_note_width: typing.Optional[typing.Union[int, float]] = None,
         extra_note_width_ratio: float = 0.0,
         size: typing.Optional[tuple[int, int]] = None,
+        render_mode: typing.Literal["colorful", "cursor", "left"] = "colorful",
         bar_alpha: int = 85,
         bar_color: tuple[int, int, int] = (255, 0, 0),
         note_alpha: int = 85,
@@ -614,6 +696,7 @@ class Converter:
             self._fixed_note_width = fixed_note_width
             self._extra_note_width_ratio = extra_note_width_ratio
             self._size = size
+            self._render_mode = render_mode
             self._bar_alpha = bar_alpha
             self._bar_color = bar_color
             self._note_alpha = note_alpha
@@ -667,6 +750,9 @@ class Converter:
             else:
                 raise ValueError("Invalid resize method")
 
+            if self._render_mode not in ("colorful", "cursor", "left"):
+                raise ValueError("Invalid render mode")
+
             if self._size is None:
                 self._size = self._pngs[0].shape[1], self._pngs[0].shape[0]
 
@@ -715,15 +801,23 @@ class Converter:
                     self._highlight_ratio[0] / self._size[0] * self._pngs[0].shape[1],
                     self._highlight_ratio[1] / self._size[1] * self._pngs[0].shape[0],
                 )
+                black_image = np.zeros((self._size[1], self._size[0], 4), dtype=np.float16)
+                black_image[..., 3] = 1.0
                 self._pngs = [
                     (
                         print(f"Rescaling MuseScore pages... {i} / {len(self._pngs)}", end="\r", file=sys.stderr),
-                        np.array(
-                            self._direct_resize_to(
-                                PIL.Image.fromarray((png * 255).astype(np.uint8)), *self._size, 0, 0, 0, 0
-                            )[0]
-                        ).astype(np.float16)
-                        / 255,
+                        (
+                            (
+                                np.array(
+                                    self._direct_resize_to(
+                                        PIL.Image.fromarray((png * 255).astype(np.uint8)), *self._size, 0, 0, 0, 0
+                                    )[0]
+                                ).astype(np.float16)
+                                / 255
+                            )
+                            if self._render_mode == "colorful"
+                            else black_image
+                        ),
                     )[1]
                     for (i, png) in enumerate(self._pngs)
                 ]
@@ -734,21 +828,32 @@ class Converter:
                 else:
                     # Target ratio is wider than the image
                     rescale_ratio = self._size[0] / self._pngs[0].shape[1]
+                black_image = np.zeros(
+                    (int(self._pngs[0].shape[0] * rescale_ratio), int(self._pngs[0].shape[1] * rescale_ratio), 4),
+                    dtype=np.float16,
+                )
+                black_image[..., 3] = 1.0
                 self._pngs = [
                     (
                         print(f"Rescaling MuseScore pages... {i} / {len(self._pngs)}", end="\r", file=sys.stderr),
-                        np.array(
-                            self._direct_resize_to(
-                                PIL.Image.fromarray((png * 255).astype(np.uint8)),
-                                int(self._pngs[0].shape[1] * rescale_ratio),
-                                int(self._pngs[0].shape[0] * rescale_ratio),
-                                0,
-                                0,
-                                0,
-                                0,
-                            )[0]
-                        ).astype(np.float16)
-                        / 255,
+                        (
+                            (
+                                np.array(
+                                    self._direct_resize_to(
+                                        PIL.Image.fromarray((png * 255).astype(np.uint8)),
+                                        int(self._pngs[0].shape[1] * rescale_ratio),
+                                        int(self._pngs[0].shape[0] * rescale_ratio),
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                    )[0]
+                                ).astype(np.float16)
+                                / 255
+                            )
+                            if self._render_mode == "colorful"
+                            else black_image
+                        ),
                     )[1]
                     for (i, png) in enumerate(self._pngs)
                 ]
@@ -922,6 +1027,8 @@ class Converter:
                 self._stop = True
                 send_thread_obj.join()
             finally:
+                if self._use_torch:
+                    self._pngs = self._pngs["cpu"]
                 try:
                     self._ffmpeg.stdin.close()
                     self._ffmpeg.wait()

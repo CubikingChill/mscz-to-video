@@ -30,6 +30,7 @@ import psutil
 from PySide6 import QtGui
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QColorDialog,
     QComboBox,
@@ -471,6 +472,20 @@ class MainWindow(QWidget):
         self.fps.setAccelerated(True)
         self.fps.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.fps_label.setBuddy(self.fps)
+        self.render_mode_label = QLabel("Render mode:", self)
+        self.render_mode_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.render_mode_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.render_colorful = QRadioButton("Colorful", self)
+        self.render_colorful.setChecked(True)
+        self.render_colorful.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.render_colorful.setToolTip("Render with colorful bars and notes")
+        self.render_mask = QRadioButton("Mask", self)
+        self.render_mask.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.render_mask.setToolTip("Render 3 files: [score], [cursor] mask, cursor [left] mask")
+        self.render_mode_group = QButtonGroup(self)
+        self.render_mode_group.addButton(self.render_colorful, 0)
+        self.render_mode_group.addButton(self.render_mask, 1)
+        self.render_mode_group.buttonToggled.connect(self.toggle_render_mode)
         self.bar_color_label_container = QWidget(self)
         self.bar_color_label_container.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.bar_color_label_container.setStyleSheet("background-color: #FFFFFFFF;")
@@ -639,8 +654,9 @@ class MainWindow(QWidget):
         self.resize_crop.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.resize_rescale = QRadioButton("Rescale", self)
         self.resize_rescale.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.resize_crop.toggled.connect(lambda: self.resize_rescale.setChecked(not self.resize_crop.isChecked()))
-        self.resize_rescale.toggled.connect(lambda: self.resize_crop.setChecked(not self.resize_rescale.isChecked()))
+        self.resize_function_group = QButtonGroup(self)
+        self.resize_function_group.addButton(self.resize_crop, 0)
+        self.resize_function_group.addButton(self.resize_rescale, 1)
 
         self.files_layout = QVBoxLayout(self.files_frame)
         self.files_layout.setContentsMargins(10, 0, 10, 10)
@@ -690,6 +706,11 @@ class MainWindow(QWidget):
         self.size_fps_layout.addWidget(self.fps_label)
         self.size_fps_layout.addWidget(self.fps)
         self.controls_layout.addLayout(self.size_fps_layout)
+        self.render_mode_layout = QHBoxLayout()
+        self.render_mode_layout.addWidget(self.render_mode_label)
+        self.render_mode_layout.addWidget(self.render_colorful)
+        self.render_mode_layout.addWidget(self.render_mask)
+        self.controls_layout.addLayout(self.render_mode_layout)
         self.bar_color_layout = QHBoxLayout()
         self.bar_color_container_layout = QVBoxLayout(self.bar_color_label_container)
         self.bar_color_container_layout.setContentsMargins(0, 0, 0, 0)
@@ -966,6 +987,22 @@ class MainWindow(QWidget):
             self.video_bitrate.setRange(0, 51)
             self.video_bitrate.setValue(18)
             self.video_bitrate.setSuffix("")
+    
+    def toggle_render_mode(self):
+        if self.render_colorful.isChecked():
+            self.bar_color_label_container.setDisabled(False)
+            self.bar_color.setDisabled(False)
+            self.bar_alpha.setDisabled(False)
+            self.note_color_label_container.setDisabled(False)
+            self.note_color.setDisabled(False)
+            self.note_alpha.setDisabled(False)
+        else:
+            self.bar_color_label_container.setDisabled(True)
+            self.bar_color.setDisabled(True)
+            self.bar_alpha.setDisabled(True)
+            self.note_color_label_container.setDisabled(True)
+            self.note_color.setDisabled(True)
+            self.note_alpha.setDisabled(True)
 
     def update_bar_color(self, ask_color=False):
         color = self.bar_color_label.styleSheet().split("background-color: #")[-1][2:8]
@@ -1174,36 +1211,136 @@ class MainWindow(QWidget):
             self.stop = False
             self.show_preview()
             self.exec_in_main(lambda: self.preview_window.setText(""))
-            self.converter.convert(
-                output_path,
-                cache_limit=self.cache_limit.value(),
-                smooth_cursor=self.smooth_cursor.isChecked(),
-                fixed_note_width=self.fixed_note_width.value() if self.fixed_note_width_checkbox.isChecked() else None,
-                extra_note_width_ratio=self.extra_note_width_ratio.value() / 100,
-                size=(self.size_x.value(), self.size_y.value()),
-                bar_color=webcolors.hex_to_rgb(
-                    "#" + self.bar_color_label.styleSheet().split("background-color: #")[-1][2:8]
-                ),
-                bar_alpha=self.bar_alpha.value(),
-                note_color=webcolors.hex_to_rgb(
-                    "#" + self.note_color_label.styleSheet().split("background-color: #")[-1][2:8]
-                ),
-                note_alpha=self.note_alpha.value(),
-                callback=self.update_preview,
-                start_offset=self.start_offset.value(),
-                end_offset=self.end_offset.value(),
-                fps=self.fps.value(),
-                jobs=self.jobs.value(),
-                ss=self.from_time.value(),
-                t=self.total_time.value(),
-                no_device_cache=not self.use_device_cache.isChecked(),
-                resize_method="crop" if self.resize_crop.isChecked() else "rescale",
-                ffmpeg_arg_ext=extra_ffmpeg_args,
-                torch_devices=";".join(
-                    f"{self.device_labels[i].text().split()[0]},{self.device_jobs[i].value()}"
-                    for i in range(len(self.device_labels))
-                ),
-            )
+            if self.render_colorful.isChecked():
+                self.converter.convert(
+                    output_path,
+                    cache_limit=self.cache_limit.value(),
+                    smooth_cursor=self.smooth_cursor.isChecked(),
+                    fixed_note_width=self.fixed_note_width.value() if self.fixed_note_width_checkbox.isChecked() else None,
+                    extra_note_width_ratio=self.extra_note_width_ratio.value() / 100,
+                    size=(self.size_x.value(), self.size_y.value()),
+                    bar_color=webcolors.hex_to_rgb(
+                        "#" + self.bar_color_label.styleSheet().split("background-color: #")[-1][2:8]
+                    ),
+                    bar_alpha=self.bar_alpha.value(),
+                    note_color=webcolors.hex_to_rgb(
+                        "#" + self.note_color_label.styleSheet().split("background-color: #")[-1][2:8]
+                    ),
+                    note_alpha=self.note_alpha.value(),
+                    callback=self.update_preview,
+                    start_offset=self.start_offset.value(),
+                    end_offset=self.end_offset.value(),
+                    fps=self.fps.value(),
+                    jobs=self.jobs.value(),
+                    ss=self.from_time.value(),
+                    t=self.total_time.value(),
+                    no_device_cache=not self.use_device_cache.isChecked(),
+                    resize_method="crop" if self.resize_crop.isChecked() else "rescale",
+                    ffmpeg_arg_ext=extra_ffmpeg_args,
+                    torch_devices=";".join(
+                        f"{self.device_labels[i].text().split()[0]},{self.device_jobs[i].value()}"
+                        for i in range(len(self.device_labels))
+                    ),
+                )
+            else:
+                # Score only
+                score_path = output_path.with_stem(output_path.stem + "_score")
+                self.converter.convert(
+                    score_path,
+                    cache_limit=self.cache_limit.value(),
+                    smooth_cursor=self.smooth_cursor.isChecked(),
+                    fixed_note_width=self.fixed_note_width.value() if self.fixed_note_width_checkbox.isChecked() else None,
+                    extra_note_width_ratio=self.extra_note_width_ratio.value() / 100,
+                    size=(self.size_x.value(), self.size_y.value()),
+                    bar_color=webcolors.hex_to_rgb(
+                        "#" + self.bar_color_label.styleSheet().split("background-color: #")[-1][2:8]
+                    ),
+                    bar_alpha=0,
+                    note_color=webcolors.hex_to_rgb(
+                        "#" + self.note_color_label.styleSheet().split("background-color: #")[-1][2:8]
+                    ),
+                    note_alpha=0,
+                    callback=self.update_preview,
+                    start_offset=self.start_offset.value(),
+                    end_offset=self.end_offset.value(),
+                    fps=self.fps.value(),
+                    jobs=self.jobs.value(),
+                    ss=self.from_time.value(),
+                    t=self.total_time.value(),
+                    no_device_cache=not self.use_device_cache.isChecked(),
+                    resize_method="crop" if self.resize_crop.isChecked() else "rescale",
+                    ffmpeg_arg_ext=extra_ffmpeg_args,
+                    torch_devices=";".join(
+                        f"{self.device_labels[i].text().split()[0]},{self.device_jobs[i].value()}"
+                        for i in range(len(self.device_labels))
+                    ),
+                )
+                # Cursor only
+                cursor_path = output_path.with_stem(output_path.stem + "_cursor")
+                self.converter.convert(
+                    cursor_path,
+                    cache_limit=self.cache_limit.value(),
+                    smooth_cursor=self.smooth_cursor.isChecked(),
+                    fixed_note_width=self.fixed_note_width.value() if self.fixed_note_width_checkbox.isChecked() else None,
+                    extra_note_width_ratio=self.extra_note_width_ratio.value() / 100,
+                    size=(self.size_x.value(), self.size_y.value()),
+                    render_mode="cursor",
+                    bar_color=webcolors.hex_to_rgb(
+                        "#" + self.bar_color_label.styleSheet().split("background-color: #")[-1][2:8]
+                    ),
+                    bar_alpha=0,
+                    note_color=webcolors.hex_to_rgb(
+                        "#" + self.note_color_label.styleSheet().split("background-color: #")[-1][2:8]
+                    ),
+                    note_alpha=0,
+                    callback=self.update_preview,
+                    start_offset=self.start_offset.value(),
+                    end_offset=self.end_offset.value(),
+                    fps=self.fps.value(),
+                    jobs=self.jobs.value(),
+                    ss=self.from_time.value(),
+                    t=self.total_time.value(),
+                    no_device_cache=not self.use_device_cache.isChecked(),
+                    resize_method="crop" if self.resize_crop.isChecked() else "rescale",
+                    ffmpeg_arg_ext=extra_ffmpeg_args,
+                    torch_devices=";".join(
+                        f"{self.device_labels[i].text().split()[0]},{self.device_jobs[i].value()}"
+                        for i in range(len(self.device_labels))
+                    ),
+                )
+                # Left only
+                left_path = output_path.with_stem(output_path.stem + "_left")
+                self.converter.convert(
+                    left_path,
+                    cache_limit=self.cache_limit.value(),
+                    smooth_cursor=self.smooth_cursor.isChecked(),
+                    fixed_note_width=self.fixed_note_width.value() if self.fixed_note_width_checkbox.isChecked() else None,
+                    extra_note_width_ratio=self.extra_note_width_ratio.value() / 100,
+                    size=(self.size_x.value(), self.size_y.value()),
+                    render_mode="left",
+                    bar_color=webcolors.hex_to_rgb(
+                        "#" + self.bar_color_label.styleSheet().split("background-color: #")[-1][2:8]
+                    ),
+                    bar_alpha=0,
+                    note_color=webcolors.hex_to_rgb(
+                        "#" + self.note_color_label.styleSheet().split("background-color: #")[-1][2:8]
+                    ),
+                    note_alpha=0,
+                    callback=self.update_preview,
+                    start_offset=self.start_offset.value(),
+                    end_offset=self.end_offset.value(),
+                    fps=self.fps.value(),
+                    jobs=self.jobs.value(),
+                    ss=self.from_time.value(),
+                    t=self.total_time.value(),
+                    no_device_cache=not self.use_device_cache.isChecked(),
+                    resize_method="crop" if self.resize_crop.isChecked() else "rescale",
+                    ffmpeg_arg_ext=extra_ffmpeg_args,
+                    torch_devices=";".join(
+                        f"{self.device_labels[i].text().split()[0]},{self.device_jobs[i].value()}"
+                        for i in range(len(self.device_labels))
+                    ),
+                )
             self.exec_in_main(lambda: self.render_button.setToolTip("Please load MuseScore file first"))
             self.exec_in_main(lambda: self.current_mscz_label.setText("No MuseScore file loaded"))
             self.exec_in_main(lambda: self.current_audio_label.setText("No audio file selected"))

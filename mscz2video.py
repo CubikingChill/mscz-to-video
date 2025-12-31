@@ -62,6 +62,14 @@ parser.add_argument(
     help="Resolution in widthxheight (like 1920x1080), default size of first page",
 )
 parser.add_argument(
+    "--render-mode",
+    choices=["colorful", "cursor", "left"],
+    default="colorful",
+    dest="render_mode",
+    help="Render mode, colorful for colorful bars and notes, cursor for only cursor highlight (used for mask video), "
+    "left for only left side of cursor highlight (used for left mask video), default colorful",
+)
+parser.add_argument(
     "--bar-color",
     type=webcolors.html5_parse_legacy_color,
     default=(255, 0, 0),
@@ -223,6 +231,7 @@ converter.convert(
     fixed_note_width=args.fixed_note_width,
     extra_note_width_ratio=args.extra_note_width_ratio,
     size=args.size,
+    render_mode=args.render_mode,
     bar_color=args.bar_color,
     bar_alpha=args.bar_alpha,
     note_color=args.note_color,
